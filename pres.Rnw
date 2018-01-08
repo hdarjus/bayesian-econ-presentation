@@ -1,0 +1,30 @@
+\documentclass{beamer}
+\usepackage[]{graphicx}
+\usepackage[]{color}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+%\usepackage[margin=1.5in]{geometry}
+
+\usetheme{CambridgeUS}
+\usecolortheme{dolphin}
+\usefonttheme{professionalfonts}
+
+\title{Stochastic volatility models with application}
+\author{Darjus Hosszejni}
+\date{January 2018}
+
+\begin{document}
+
+\begin{frame}
+\titlepage
+\end{frame}
+
+\begin{frame}{Motivation}
+
+\end{frame}
+
+\end{document}
+
+\bibliographystyle{unsrt}
+\bibliography{references}
