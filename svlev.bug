@@ -1,0 +1,20 @@
+model {
+  phi_beta ~ dbeta(5, 1.5)
+  rho_beta ~ dbeta(1, 1)
+  mu ~ dnorm(0, 1/10000)
+  sigma2 ~ dgamma(0.5, 3*0.5)
+  
+  phi <- phi_beta*2 - 1
+  rho <- rho_beta*2 - 1
+  invsigma2 <- 1/sigma2
+  sigma <- sqrt(sigma2)
+  
+  h[1] ~ dnorm(mu, (1-pow(phi, 2)) * invsigma2)
+  
+  for (i in 1:(length(y)-1)) {
+    h[i+1] ~ dnorm(mu + phi*(h[i]-mu), invsigma2)
+    y[i] ~ dnorm(rho * exp(h[i]/2) * (h[i+1] - (mu + phi*(h[i]-mu)))/sigma, exp(-h[i])/(1-pow(rho, 2)))
+  }
+  
+  y[length(y)] ~ dnorm(0, exp(-h[length(y)]))
+}

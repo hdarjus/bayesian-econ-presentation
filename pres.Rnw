@@ -10,17 +10,85 @@
 \usecolortheme{dolphin}
 \usefonttheme{professionalfonts}
 
-\title{Stochastic volatility models with application}
+\title[StochVol models with application]{Stochastic volatility models with application}
 \author{Darjus Hosszejni}
 \date{January 2018}
 
 \begin{document}
 
+<<setup, include=FALSE>>=
+library(knitr)
+library(tidyverse)
+library(stochvol)
+library(rjags)
+library(TTR)
+opts_chunk$set(echo = FALSE, fig.align = "center", fig.show = "hold")
+@
+
+<<load-data, include=FALSE>>=
+dat <- readRDS("data.RDS")
+dat <- dat %>% mutate(Return = Price/lag(Price)-1,
+                      Log.Return = log(1+Return),
+                      Emp.SD = runSD(Log.Return, 60))
+@
+
 \begin{frame}
 \titlepage
 \end{frame}
 
-\begin{frame}{Motivation}
+\begin{frame}{Problem}
+Investing in Siemens AG (SIE.DE) in 2008
+\begin{itemize}
+\item Model the price movement (returns)
+\item Make predictions
+\end{itemize}
+
+<<data-plot, fig.asp=0.4>>=
+dat %>%
+  ggplot(aes(x = Date, y = Price)) +
+  geom_line() +
+  ggtitle("Price of SIE.DE") +
+  theme(plot.title = element_text(hjust = 0.5))
+@
+
+\end{frame}
+
+\begin{frame}{What model to use?}
+Empirical facts about log returns
+\begin{itemize}
+\item No autocorrelation
+\item Autocorrelation in the absolute values
+\end{itemize}
+<<acf-plot, fig.asp=.8, out.width=".5\\linewidth">>=
+acf(dat$Log.Return, na.action = na.pass, main = "ACF of log returns")
+acf(abs(dat$Log.Return), na.action = na.pass, main = "ACF of absolute log returns")
+@
+\end{frame}
+
+\begin{frame}{Model}
+Empirical facts about log returns
+\begin{itemize}
+\item No autocorrelation
+\item Autocorrelation in the absolute values
+\end{itemize}
+
+\begin{align*}
+y_t &= \varepsilon_t e^{h_t/2} \\
+h_{t+1} &= \mu + \phi(h_t-\mu) + \sigma\eta_t
+\end{align*}
+\end{frame}
+
+\begin{frame}{Another phenomenon}
+<<emp-plot, fig.asp=.6>>=
+dat %>%
+  rename(Empirical.St.Dev = Emp.SD) %>%
+  gather(key, Value, Price, Empirical.St.Dev, factor_key = TRUE) %>%
+  ggplot(aes(x = Date, y = Value)) +
+  geom_line() +
+  facet_grid(key ~ ., scales = "free_y") +
+  ggtitle("Price and volatility of SIE.DE") +
+  theme(plot.title = element_text(hjust = 0.5))
+@
 
 \end{frame}
 
