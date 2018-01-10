@@ -24,7 +24,7 @@ library(stochvol)
 library(rjags)
 library(TTR)
 opts_chunk$set(echo = FALSE, fig.align = "center", fig.show = "hold",
-               warning = FALSE, cache = TRUE)
+               warning = FALSE, cache = TRUE, dev = "png")
 final.version <- TRUE
 @
 
