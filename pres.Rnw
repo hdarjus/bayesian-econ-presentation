@@ -1,9 +1,9 @@
-\documentclass{beamer}
+\documentclass[usenames,dvipsnames]{beamer}
 \usepackage[]{graphicx}
-\usepackage[]{color}
 \usepackage[utf8]{inputenc}
 \usepackage{amsmath}
 \usepackage{amssymb}
+\usepackage{xcolor}
 %\usepackage[margin=1.5in]{geometry}
 
 \usetheme{CambridgeUS}
@@ -19,10 +19,13 @@
 <<setup, include=FALSE>>=
 library(knitr)
 library(tidyverse)
+library(coda)
 library(stochvol)
 library(rjags)
 library(TTR)
-opts_chunk$set(echo = FALSE, fig.align = "center", fig.show = "hold")
+opts_chunk$set(echo = FALSE, fig.align = "center", fig.show = "hold",
+               warning = FALSE, cache = TRUE)
+final.version <- TRUE
 @
 
 <<load-data, include=FALSE>>=
@@ -30,6 +33,8 @@ dat <- readRDS("data.RDS")
 dat <- dat %>% mutate(Return = Price/lag(Price)-1,
                       Log.Return = log(1+Return),
                       Emp.SD = runSD(Log.Return, 60))
+pred.len <- 20  # length of prediction
+dat.fit <- head(dat[-1, ], -pred.len)  # dataset to fit, i.e. in-sample
 @
 
 \begin{frame}
@@ -44,7 +49,7 @@ Investing in Siemens AG (SIE.DE) in 2008
 \end{itemize}
 
 <<data-plot, fig.asp=0.4>>=
-dat %>%
+dat.fit %>%
   ggplot(aes(x = Date, y = Price)) +
   geom_line() +
   ggtitle("Price of SIE.DE") +
@@ -60,27 +65,109 @@ Empirical facts about log returns
 \item Autocorrelation in the absolute values
 \end{itemize}
 <<acf-plot, fig.asp=.8, out.width=".5\\linewidth">>=
-acf(dat$Log.Return, na.action = na.pass, main = "ACF of log returns")
-acf(abs(dat$Log.Return), na.action = na.pass, main = "ACF of absolute log returns")
+acf(dat.fit$Log.Return, na.action = na.pass, main = "ACF of log returns")
+acf(abs(dat.fit$Log.Return), na.action = na.pass, main = "ACF of absolute log returns")
 @
 \end{frame}
 
-\begin{frame}{Model}
+\begin{frame}
+\frametitle<1,3>{Model}
+\frametitle<2>{SV vs. EGARCH}
+\onslide<1>{
 Empirical facts about log returns
 \begin{itemize}
 \item No autocorrelation
 \item Autocorrelation in the absolute values
 \end{itemize}
+}
+\begin{align*}
+y_t &= \varepsilon_t \sqrt{e^{h_t}} \\
+h_{t+1} &= \mu + \phi(h_t-\mu) + \sigma\onslide<1,3>{\eta_t}\onslide<2>{g(\varepsilon_t)} \\
+\forall t:\varepsilon_t, \eta_t &\sim \text{i.i.d. }\mathcal{N}(0,1)
+\end{align*}
+\end{frame}
 
+\begin{frame}{SV model simulations}
+<<sim-plot, fig.asp=.6>>=
+set.seed(2)
+dat.fit %>%
+  add_column(Simulation1 = svsim(len = NROW(dat.fit), mu = -8.67, phi = 0.87, sigma = 0.4)$y) %>%
+  add_column(Simulation2 = svsim(len = NROW(dat.fit), mu = -8.67, phi = 0.87, sigma = 0.4)$y) %>%
+  add_column(Simulation3 = svsim(len = NROW(dat.fit), mu = -8.67, phi = 0.87, sigma = 0.4)$y) %>%
+  gather(Key, Value, Log.Return, Simulation1:Simulation3, factor_key = TRUE) %>%
+  ggplot(aes(x = Date, y = Value)) +
+  geom_line() +
+  facet_grid(Key ~ .) +
+  ggtitle("Log returns of SIE.DE and 3 simulated paths from SV")
+@
+\end{frame}
+
+\begin{frame}{Parameters}
+\begin{align*}
+y_t &= \varepsilon_t e^{h_t/2} \\
+h_{t+1} &= {\color{Peach}\mu} + {\color{ForestGreen}\phi}(h_t-{\color{Peach}\mu}) + {\color{Aquamarine}\sigma}\eta_t \\
+\forall t:\varepsilon_t, \eta_t &\sim \text{i.i.d. }\mathcal{N}(0,1)
+\end{align*}
+\begin{table}[]
+\centering
+\begin{tabular}{l|c|c|}
+\cline{2-3}
+                               & Support        & Prior sensitivity \\ \hline
+\multicolumn{1}{|l|}{${\color{ForestGreen}\phi}$}   & $(-1,1)$       & High              \\ \hline
+\multicolumn{1}{|l|}{${\color{Aquamarine}\sigma}$} & $\mathbb{R}^+$ & Medium            \\ \hline
+\multicolumn{1}{|l|}{${\color{Peach}\mu}$}    & $\mathbb{R}$   & Low               \\ \hline
+\end{tabular}
+\caption{Support and sensitivity of parameters}
+\label{tab:params}
+\end{table}
+\end{frame}
+
+\begin{frame}{Identifiability of $\phi$}
+Keep possible issues in mind!
 \begin{align*}
 y_t &= \varepsilon_t e^{h_t/2} \\
 h_{t+1} &= \mu + \phi(h_t-\mu) + \sigma\eta_t
 \end{align*}
+E.g. $h_t$ (almost) constant $\implies$ no information about $\phi$ in the data.
+<<ident-traceplot, fig.asp=0.3>>=
+draws <- if (final.version) 25000 else 250
+set.seed(1)
+tibble(Draw = 1:draws, Phi = as.numeric(svsample(rnorm(400), draws = draws, priorphi = c(1,1))$para[, "phi"])) %>%
+  ggplot(aes(x = Draw, y = Phi)) +
+  geom_line() +
+  ggtitle(bquote(Traceplot~of~phi~when~y_t%==%symbol(N)(0,1)%<=>%h_t%==%1))
+@
+Conclusion: informative prior is needed for $\phi$
+\end{frame}
+
+\begin{frame}{Results}
+Increasing ``informativeness'' on $\phi$:
+<<stochvol-plot-fun>>=
+mysvplot <- function (x, namelist, limitmatrix) {
+  opar <- par(mar = c(1.9, 1.9, 1.9, 0.5))
+  for (i in seq_along(namelist)) {
+    densplot(x[, namelist[i]], main = namelist[i], xlim = limitmatrix[i, ])
+  }
+  par(opar)
+}
+namelist <- c("phi", "sigma", "mu")
+limitmatrix <- matrix(c(0.4, 1, 0.1, 0.9, -10, -7.5), 3, 2, byrow = TRUE)
+@
+<<stochvol-plot, out.width=".3\\linewidth", fig.asp=.6>>=
+mysvplot(svsample(dat.fit$Log.Return, draws = draws, priorphi = c(1, 1))$para, namelist, limitmatrix)
+@
+<<stochvol-plot2, out.width=".3\\linewidth", fig.asp=.6>>=
+result.sv <- svsample(dat.fit$Log.Return, draws = draws, priorphi = c(5, 1.5))
+mysvplot(result.sv$para, namelist, limitmatrix)
+@
+<<stochvol-plot3, out.width=".3\\linewidth", fig.asp=.6>>=
+mysvplot(svsample(dat.fit$Log.Return, draws = draws, priorphi = c(20, 1.5))$para, namelist, limitmatrix)
+@
 \end{frame}
 
 \begin{frame}{Another phenomenon}
 <<emp-plot, fig.asp=.6>>=
-dat %>%
+dat.fit %>%
   rename(Empirical.St.Dev = Emp.SD) %>%
   gather(key, Value, Price, Empirical.St.Dev, factor_key = TRUE) %>%
   ggplot(aes(x = Date, y = Value)) +
@@ -88,6 +175,79 @@ dat %>%
   facet_grid(key ~ ., scales = "free_y") +
   ggtitle("Price and volatility of SIE.DE") +
   theme(plot.title = element_text(hjust = 0.5))
+@
+\end{frame}
+
+\begin{frame}{SV with leverage}
+\begin{align*}
+y_t &= \varepsilon_t e^{h_t/2} \\
+h_{t+1} &= \mu + \phi(h_t-\mu) + \sigma\eta_t \\
+\forall t:\varepsilon_t &\sim \text{i.i.d. }\mathcal{N}(0,1) \\
+\forall t:\eta_t &\sim \text{i.i.d. }\mathcal{N}(0,1) \\
+{\color{red}\text{cor}(\varepsilon_t,\eta_t)} &= {\color{red}\rho}
+\end{align*}
+\end{frame}
+
+<<sv-lev-setup, include=FALSE>>=
+n.chains <- 1
+n.adapt <- if (final.version) 10000 else 100
+n.update <- n.adapt
+prednames <- paste0("pred[", seq_len(pred.len), "]")
+jamodel <- jags.model("svlev.bug",
+                      data = list(y = dat.fit$Log.Return, pred.len = pred.len),
+                      n.chains = n.chains, n.adapt = n.adapt,
+                      inits = lapply(1:n.chains, function (x) list(.RNG.seed = x, .RNG.name = "base::Wichmann-Hill")))  # reproducibility
+update(jamodel, n.update)
+jafit <- coda.samples(jamodel, c("phi", "rho", "sigma", "mu", prednames), draws)
+@
+
+\begin{frame}{Comparison of results}
+SV with leverage
+<<svlev-plot, fig.asp=0.8, out.width=".24\\linewidth", fig.align="left">>=
+mysvplot(jafit, c(namelist, "rho"), rbind(limitmatrix, c(-0.6, 0.2)))
+@
+<<stochvol-plot4, fig.asp=0.8, out.width=".24\\linewidth", fig.align="left">>=
+mysvplot(result.sv$para, namelist, limitmatrix)
+@
+SV without leverage
+\end{frame}
+
+<<pred-setup>>=
+probs <- c(1, 2.5, 5, 10, 50, 90, 95, 97.5, 99)/100  # quantiles to plot
+# SV prediction
+sv.pred.h <- predict(result.sv, steps = pred.len)  # predict volatility
+sv.pred.h.numeric <- as.numeric(sv.pred.h)  # helper
+sv.pred.y <- array(rnorm(sv.pred.h.numeric, 0, exp(sv.pred.h.numeric/2)), dim = dim(sv.pred.h))  # predict log returns
+sv.pred.price <- exp(rbind(0, apply(sv.pred.y, 1, cumsum)))  # predict prices (apply transposes!)
+sv.pred.price <- sv.pred.price * dat$Price[NROW(dat)-pred.len]  # start with the last known value
+sv.q <- apply(sv.pred.price, 1, quantile, probs = probs)  # apply transposes!
+sv.q.frame <- as.tibble(t(sv.q)) %>%
+  bind_cols(dat %>% select(Date, Price) %>% tail(pred.len+1)) %>%
+  add_column(Model = factor("SV", levels = c("SV", "SVlev"))) %>%
+  gather(Quantile, Value, "1%":"99%", factor_key = TRUE)
+
+# SV with leverage prediction
+svlev.pred.y <- jafit[[1]][, prednames]  # predicted log returns
+svlev.pred.price <- exp(rbind(0, apply(svlev.pred.y, 1, cumsum)))  # predict prices (apply transposes!)
+svlev.pred.price <- svlev.pred.price * dat$Price[NROW(dat)-pred.len]  # start with the last known value
+svlev.q <- apply(svlev.pred.price, 1, quantile, probs = probs)  # apply transposes!
+svlev.q.frame <- as.tibble(t(svlev.q)) %>%
+  bind_cols(dat %>% select(Date, Price) %>% tail(pred.len+1)) %>%
+  add_column(Model = factor("SVlev", levels = c("SV", "SVlev"))) %>%
+  gather(Quantile, Value, "1%":"99%", factor_key = TRUE)
+
+# Combine predictions
+quantile.frame <- bind_rows(sv.q.frame, svlev.q.frame)
+@
+
+\begin{frame}{Prediction}
+<<pred-plot, fig.asp=0.6>>=
+quantile.frame %>%
+  ggplot(aes(x = Date)) +
+  geom_line(aes(y = Value, color = Quantile, linetype = Model)) +
+  geom_line(aes(y = Price, color = "Price")) +
+  scale_color_manual(values = c(paste0("steelblue", c("1", "2", "3", "", "4", "", "3", "2", "1")), "black")) +
+  ggtitle("20 day price predictions from the two models")
 @
 
 \end{frame}
