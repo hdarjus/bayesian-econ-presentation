@@ -17,4 +17,13 @@ model {
   }
   
   y[length(y)] ~ dnorm(0, exp(-h[length(y)]))
+  
+  # Prediction
+  
+  h[length(y)+1] ~ dnorm(mu + phi*(h[length(y)]-mu), invsigma2)
+  
+  for (i in (length(y)+1):(length(y)+pred.len)) {
+    h[i+1] ~ dnorm(mu + phi*(h[i]-mu), invsigma2)
+    pred[i-length(y)] ~ dnorm(rho * exp(h[i]/2) * (h[i+1] - (mu + phi*(h[i]-mu)))/sigma, exp(-h[i])/(1-pow(rho, 2)))
+  }
 }
